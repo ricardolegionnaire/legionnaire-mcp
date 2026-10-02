@@ -8,15 +8,17 @@ if [ -z "$MCP_ENDPOINT" ]; then
   exit 1
 fi
 
-mkdir -p /workspaces/xiaozhi-client
-
-cat > /workspaces/xiaozhi-client/xiaozhi.config.json <<EOF
+cat > /workspaces/xiaozhi.config.json <<EOF
 {
   "mcpEndpoint": "$MCP_ENDPOINT",
   "mcpServers": {
     "coingecko": {
       "type": "http",
-      "url": "https://mcp.api.coingecko.com/mcp"
+      "url": "https://mcp.api.coingecko.com/mcp",
+      "headers": {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      }
     }
   },
   "connection": {
@@ -30,6 +32,9 @@ cat > /workspaces/xiaozhi-client/xiaozhi.config.json <<EOF
 }
 EOF
 
-xiaozhi config set mcpEndpoint "$MCP_ENDPOINT"
+export XIAOZHI_CONFIG_DIR=/workspaces
+cd /workspaces
+
+echo "Configuration written to /workspaces/xiaozhi.config.json"
 
 exec xiaozhi start
