@@ -8,9 +8,9 @@ if [ -z "$MCP_ENDPOINT" ]; then
   exit 1
 fi
 
-mkdir -p /workspaces
+mkdir -p /workspaces/xiaozhi-client
 
-cat > /workspaces/xiaozhi.config.json <<EOF
+cat > /workspaces/xiaozhi-client/xiaozhi.config.json <<EOF
 {
   "mcpEndpoint": "$MCP_ENDPOINT",
   "mcpServers": {
