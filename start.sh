@@ -10,6 +10,4 @@ fi
 
 xiaozhi config set mcpEndpoint "$MCP_ENDPOINT"
 
-xiaozhi config set web.port "${PORT:-10000}"
-
 exec xiaozhi start
