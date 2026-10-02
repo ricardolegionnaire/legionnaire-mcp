@@ -8,6 +8,26 @@ if [ -z "$MCP_ENDPOINT" ]; then
   exit 1
 fi
 
-xiaozhi config set mcpEndpoint "$MCP_ENDPOINT"
+mkdir -p /workspaces
+
+cat > /workspaces/xiaozhi.config.json <<EOF
+{
+  "mcpEndpoint": "$MCP_ENDPOINT",
+  "mcpServers": {
+    "coingecko": {
+      "type": "http",
+      "url": "https://mcp.api.coingecko.com/mcp"
+    }
+  },
+  "connection": {
+    "heartbeatInterval": 30000,
+    "heartbeatTimeout": 10000,
+    "reconnectInterval": 5000
+  },
+  "webUI": {
+    "port": 9999
+  }
+}
+EOF
 
 exec xiaozhi start
