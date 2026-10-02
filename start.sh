@@ -30,4 +30,6 @@ cat > /workspaces/xiaozhi-client/xiaozhi.config.json <<EOF
 }
 EOF
 
+xiaozhi config set mcpEndpoint "$MCP_ENDPOINT"
+
 exec xiaozhi start
