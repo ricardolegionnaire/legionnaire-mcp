@@ -1,41 +1,42 @@
 #!/bin/sh
 set -e
 
-echo "Starting Legionnaire MCP bridge..."
-
-if [ -z "$MCP_ENDPOINT" ]; then
-  echo "ERROR: MCP_ENDPOINT is not set"
-  exit 1
-fi
-
 mkdir -p /workspaces
 
 cat > /workspaces/xiaozhi.config.json <<EOF
 {
-  "mcpEndpoint": "$MCP_ENDPOINT",
+  "mcpEndpoint": "${MCP_ENDPOINT}",
   "mcpServers": {
     "coingecko": {
-      "type": "http",
+      "type": "streamable-http",
       "url": "https://mcp.coingecko.com/mcp",
       "headers": {
         "Accept": "application/json",
         "Content-Type": "application/json"
       }
+    },
+    "tavily": {
+      "type": "streamable-http",
+      "url": "https://mcp.tavily.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${TAVILY_API_KEY}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      }
+    },
+    "google-calendar": {
+      "type": "streamable-http",
+      "url": "https://legionnaire-calendar.onrender.com/mcp",
+      "headers": {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      }
     }
-  },
-  "connection": {
-    "heartbeatInterval": 30000,
-    "heartbeatTimeout": 10000,
-    "reconnectInterval": 5000
-  },
-  "webUI": {
-    "port": 9999
   }
 }
 EOF
 
-cd /workspaces
-
-echo "Config loaded from /workspaces/xiaozhi.config.json"
+echo "Configuração MCP criada:"
+cat /workspaces/xiaozhi.config.json | sed 's/Bearer [^"]*/Bearer ***HIDDEN***/'
 
 exec xiaozhi start
