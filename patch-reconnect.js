@@ -8,7 +8,7 @@ console.log("LEGIONNAIRE - AUTO RECONNECT PATCH");
 console.log("======================================");
 
 if (!fs.existsSync(file)) {
-  console.error("ERRO: endpoint index.js não encontrado");
+  console.error("ERRO: endpoint index.js não encontrado.");
   process.exit(1);
 }
 
@@ -19,50 +19,61 @@ if (code.includes("LEGIONNAIRE_AUTO_RECONNECT")) {
   process.exit(0);
 }
 
-const original = `  handleConnectionClose(code, reason) {
-    this.connectionStatus = false;
-    this.serverInitialized = false;
-    this.connectionState = "disconnected" /* DISCONNECTED */;
-    console.info(\`\\\\u5C0F\\\\u667A\\\\u8FDE\\\\u63A5\\\\u5DF2\\\\u5173\\\\u95ED (\\\\u4EE3\\\\u7801: \${code}, \\\\u539F\\\\u56E0: \${reason})\`);
-  }`;
+/*
+ * Procuramos a função real sem depender do texto chinês
+ * nem de escapes Unicode.
+ */
+const pattern =
+  /  handleConnectionClose\(code, reason\) \{\n    this\.connectionStatus = false;\n    this\.serverInitialized = false;\n    this\.connectionState = "disconnected" \/\* DISCONNECTED \*\/;\n    console\.info\([^\n]+\);\n  \}/;
 
 const replacement = `  handleConnectionClose(code, reason) {
     this.connectionStatus = false;
     this.serverInitialized = false;
     this.connectionState = "disconnected" /* DISCONNECTED */;
-    console.info(\`\\\\u5C0F\\\\u667A\\\\u8FDE\\\\u63A5\\\\u5DF2\\\\u5173\\\\u95ED (\\\\u4EE3\\\\u7801: \${code}, \\\\u539F\\\\u56E0: \${reason})\`);
+    console.info(\`小智连接已关闭 (代码: \${code}, 原因: \${reason})\`);
 
     // LEGIONNAIRE_AUTO_RECONNECT
-    if (code !== 1000) {
-      console.info("[LEGIONNAIRE] Ligação Xiaozhi perdida. Reconexão automática em 5 segundos...");
+    if (code !== 1000 && !this.__legionnaireReconnectTimer) {
+      const scheduleReconnect = () => {
+        console.info("[LEGIONNAIRE] Reconexão automática agendada para 5 segundos...");
 
-      setTimeout(() => {
-        if (!this.connectionStatus) {
+        this.__legionnaireReconnectTimer = setTimeout(async () => {
+          this.__legionnaireReconnectTimer = null;
+
+          if (this.connectionStatus) {
+            console.info("[LEGIONNAIRE] Ligação já recuperada. Reconexão cancelada.");
+            return;
+          }
+
           console.info("[LEGIONNAIRE] A tentar reconectar ao Xiaozhi...");
 
-          this.reconnect()
-            .then(() => {
-              console.info("[LEGIONNAIRE] Reconexão Xiaozhi concluída.");
-            })
-            .catch((error) => {
-              console.error("[LEGIONNAIRE] Falha na reconexão automática:", error);
-            });
-        }
-      }, 5000);
+          try {
+            await this.reconnect();
+            console.info("[LEGIONNAIRE] Reconexão Xiaozhi concluída.");
+          } catch (error) {
+            console.error("[LEGIONNAIRE] Falha na reconexão:", error);
+
+            if (!this.connectionStatus) {
+              scheduleReconnect();
+            }
+          }
+        }, 5000);
+      };
+
+      scheduleReconnect();
     }
   }`;
 
-if (!code.includes(original)) {
-  console.error("ERRO: bloco handleConnectionClose não encontrado.");
-  console.error("O xiaozhi-client pode ter mudado de versão.");
+if (!pattern.test(code)) {
+  console.error("ERRO: handleConnectionClose não encontrado no formato esperado.");
   process.exit(1);
 }
 
-code = code.replace(original, replacement);
+code = code.replace(pattern, replacement);
 
 fs.writeFileSync(file, code, "utf8");
 
 console.log("Patch de reconexão aplicado com sucesso.");
-console.log("Erro WebSocket != 1000 -> reconnect automático.");
-console.log("Espera inicial: 5 segundos.");
+console.log("Quedas WebSocket anormais serão recuperadas automaticamente.");
+console.log("Intervalo entre tentativas: 5 segundos.");
 console.log("======================================");
