@@ -80,6 +80,9 @@ echo " - coingecko"
 echo " - tavily"
 echo " - google-calendar"
 
+echo "A aplicar patch de reconexão automática..."
+node /app/patch-reconnect.js
+
 echo "A iniciar Xiaozhi Client..."
 
 exec xiaozhi start
