@@ -29,6 +29,13 @@ echo "======================================"
 cat > /workspaces/xiaozhi.config.json <<EOF
 {
   "mcpEndpoint": "${MCP_ENDPOINT}",
+
+  "connection": {
+    "heartbeatInterval": 30000,
+    "heartbeatTimeout": 10000,
+    "reconnectInterval": 5000
+  },
+
   "mcpServers": {
     "coingecko": {
       "type": "streamable-http",
@@ -38,6 +45,7 @@ cat > /workspaces/xiaozhi.config.json <<EOF
         "Content-Type": "application/json"
       }
     },
+
     "tavily": {
       "type": "streamable-http",
       "url": "https://mcp.tavily.com/mcp",
@@ -47,6 +55,7 @@ cat > /workspaces/xiaozhi.config.json <<EOF
         "Content-Type": "application/json"
       }
     },
+
     "google-calendar": {
       "type": "streamable-http",
       "url": "https://legionnaire-calendar.onrender.com/mcp",
@@ -60,6 +69,11 @@ cat > /workspaces/xiaozhi.config.json <<EOF
 EOF
 
 echo "Configuração MCP criada em /workspaces/xiaozhi.config.json"
+
+echo "Ligação configurada:"
+echo " - Heartbeat: 30 segundos"
+echo " - Timeout: 10 segundos"
+echo " - Reconexão: 5 segundos"
 
 echo "MCPs configurados:"
 echo " - coingecko"
