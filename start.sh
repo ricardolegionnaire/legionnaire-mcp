@@ -3,6 +3,19 @@ set -e
 
 mkdir -p /workspaces
 
+if [ -z "$MCP_ENDPOINT" ]; then
+  echo "ERRO: MCP_ENDPOINT não definido"
+  exit 1
+fi
+
+if [ -z "$TAVILY_API_KEY" ]; then
+  echo "ERRO: TAVILY_API_KEY não definida"
+  exit 1
+fi
+
+echo "MCP_ENDPOINT: OK"
+echo "TAVILY_API_KEY: OK (${#TAVILY_API_KEY} caracteres)"
+
 cat > /workspaces/xiaozhi.config.json <<EOF
 {
   "mcpEndpoint": "${MCP_ENDPOINT}",
