@@ -74,7 +74,7 @@ cat > /workspaces/xiaozhi.config.json <<EOF
 
     "memory": {
       "command": "node",
-      "args": ["/app/memory-mcp.js"],
+      "args": ["/app/memory-mcp.mjs"],
       "env": {
         "DATABASE_URL": "${DATABASE_URL}"
       }
