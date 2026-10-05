@@ -11,12 +11,19 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
+if (!process.env.OPENAI_API_KEY) {
+  console.error("ERROR: OPENAI_API_KEY não está definida.");
+  process.exit(1);
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000
 });
+
+const EMBEDDING_MODEL = "text-embedding-3-small";
 
 function textResult(text) {
   return {
@@ -47,10 +54,65 @@ function cleanCategory(category) {
   return category.trim().toLowerCase();
 }
 
+function vectorToPg(vector) {
+  return `[${vector.join(",")}]`;
+}
+
+async function createEmbedding(text) {
+  const response = await fetch(
+    "https://api.openai.com/v1/embeddings",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: EMBEDDING_MODEL,
+        input: text,
+        encoding_format: "float"
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+
+    throw new Error(
+      `OpenAI Embeddings erro ${response.status}: ${errorText}`
+    );
+  }
+
+  const data = await response.json();
+
+  if (
+    !data.data ||
+    !data.data[0] ||
+    !Array.isArray(data.data[0].embedding)
+  ) {
+    throw new Error("Resposta de embedding inválida.");
+  }
+
+  return data.data[0].embedding;
+}
+
+async function tryCreateEmbedding(text) {
+  try {
+    return await createEmbedding(text);
+  } catch (error) {
+    console.error(
+      "Falha ao criar embedding; será usado fallback textual:",
+      error.message
+    );
+
+    return null;
+  }
+}
+
 function createServer() {
   const server = new McpServer({
     name: "legionnaire-memory",
-    version: "2.0.0"
+    version: "3.0.0"
   });
 
   // ============================================================
@@ -60,7 +122,7 @@ function createServer() {
     "save_memory",
     {
       description:
-        "Guarda memória persistente útil do Ricardo. Antes de criar uma nova memória, o sistema verifica duplicados. Usa categorias claras como perfil, preferencia, projeto, trabalho, aprendizagem, objetivo, decisao, rotina, tecnologia ou outro. Não guardar passwords, tokens, chaves API ou segredos. Informação sensível só deve ser guardada quando Ricardo pedir explicitamente.",
+        "Guarda memória persistente útil do Ricardo. Evita duplicados e cria representação semântica para pesquisa futura. Usa categorias claras como perfil, preferencia, projeto, trabalho, aprendizagem, objetivo, decisao, rotina, tecnologia ou outro. Não guardar passwords, tokens, chaves API ou segredos.",
       inputSchema: z.object({
         user_id: z.string().default("ricardo"),
         category: z.string(),
@@ -84,7 +146,6 @@ function createServer() {
       const contentHash = createContentHash(content);
       const normalizedCategory = cleanCategory(category);
 
-      // Procurar memória igual, incluindo memórias antigas sem hash
       const duplicate = await pool.query(
         `
         SELECT *
@@ -101,7 +162,6 @@ function createServer() {
         [user_id, contentHash, normalized]
       );
 
-      // Se já existir, não criar duplicado
       if (duplicate.rowCount > 0) {
         const old = duplicate.rows[0];
 
@@ -143,6 +203,8 @@ function createServer() {
         );
       }
 
+      const embedding = await tryCreateEmbedding(content);
+
       const result = await pool.query(
         `
         INSERT INTO memories (
@@ -154,10 +216,11 @@ function createServer() {
           expires_at,
           metadata,
           content_hash,
-          access_count
+          access_count,
+          embedding
         )
         VALUES (
-          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, 0
+          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, 0, $9::vector
         )
         RETURNING *
         `,
@@ -169,7 +232,8 @@ function createServer() {
           source ?? null,
           expires_at ?? null,
           JSON.stringify(metadata ?? {}),
-          contentHash
+          contentHash,
+          embedding ? vectorToPg(embedding) : null
         ]
       );
 
@@ -178,6 +242,7 @@ function createServer() {
           {
             success: true,
             duplicate: false,
+            embedding_created: embedding !== null,
             message: "Memória guardada com sucesso.",
             memory: result.rows[0]
           },
@@ -189,13 +254,13 @@ function createServer() {
   );
 
   // ============================================================
-  // 2. PESQUISAR MEMÓRIAS
+  // 2. PESQUISAR MEMÓRIAS - HÍBRIDA
   // ============================================================
   server.registerTool(
     "search_memory",
     {
       description:
-        "Pesquisa memórias persistentes do Ricardo. Deve ser usada antes de responder sobre preferências, decisões, projetos, objetivos, histórico ou outros factos pessoais que possam ter sido guardados.",
+        "Pesquisa memórias persistentes do Ricardo usando significado semântico, texto, importância, utilização e recência. Deve ser usada antes de responder sobre preferências, decisões, projetos, objetivos, histórico ou outros factos pessoais.",
       inputSchema: z.object({
         user_id: z.string().default("ricardo"),
         query: z.string().min(1),
@@ -204,75 +269,180 @@ function createServer() {
       })
     },
     async ({ user_id, query, category, limit }) => {
-      const searchTerm = `%${query.trim()}%`;
+      const embedding = await tryCreateEmbedding(query);
 
       let result;
 
-      if (category) {
-        result = await pool.query(
-          `
-          SELECT
-            id,
-            user_id,
-            category,
-            content,
-            importance,
-            source,
-            created_at,
-            updated_at,
-            expires_at,
-            last_accessed_at,
-            access_count,
-            metadata
-          FROM memories
-          WHERE user_id = $1
-            AND (expires_at IS NULL OR expires_at > NOW())
-            AND category = $2
-            AND content ILIKE $3
-          ORDER BY
-            importance DESC,
-            access_count DESC,
-            updated_at DESC
-          LIMIT $4
-          `,
-          [
-            user_id,
-            cleanCategory(category),
-            searchTerm,
-            limit
-          ]
-        );
+      if (embedding) {
+        const vector = vectorToPg(embedding);
+
+        if (category) {
+          result = await pool.query(
+            `
+            SELECT
+              id,
+              user_id,
+              category,
+              content,
+              importance,
+              source,
+              created_at,
+              updated_at,
+              expires_at,
+              last_accessed_at,
+              access_count,
+              metadata,
+              CASE
+                WHEN embedding IS NOT NULL
+                THEN 1 - (embedding <=> $4::vector)
+                ELSE 0
+              END AS semantic_similarity
+            FROM memories
+            WHERE user_id = $1
+              AND category = $2
+              AND (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY
+              (
+                CASE
+                  WHEN embedding IS NOT NULL
+                  THEN 1 - (embedding <=> $4::vector)
+                  ELSE 0
+                END * 0.70
+                +
+                LEAST(importance / 10.0, 1.0) * 0.15
+                +
+                LEAST(COALESCE(access_count, 0) / 10.0, 1.0) * 0.10
+                +
+                CASE
+                  WHEN updated_at > NOW() - INTERVAL '30 days'
+                  THEN 0.05
+                  ELSE 0
+                END
+              ) DESC
+            LIMIT $3
+            `,
+            [
+              user_id,
+              cleanCategory(category),
+              limit,
+              vector
+            ]
+          );
+        } else {
+          result = await pool.query(
+            `
+            SELECT
+              id,
+              user_id,
+              category,
+              content,
+              importance,
+              source,
+              created_at,
+              updated_at,
+              expires_at,
+              last_accessed_at,
+              access_count,
+              metadata,
+              CASE
+                WHEN embedding IS NOT NULL
+                THEN 1 - (embedding <=> $3::vector)
+                ELSE 0
+              END AS semantic_similarity
+            FROM memories
+            WHERE user_id = $1
+              AND (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY
+              (
+                CASE
+                  WHEN embedding IS NOT NULL
+                  THEN 1 - (embedding <=> $3::vector)
+                  ELSE 0
+                END * 0.70
+                +
+                LEAST(importance / 10.0, 1.0) * 0.15
+                +
+                LEAST(COALESCE(access_count, 0) / 10.0, 1.0) * 0.10
+                +
+                CASE
+                  WHEN updated_at > NOW() - INTERVAL '30 days'
+                  THEN 0.05
+                  ELSE 0
+                END
+              ) DESC
+            LIMIT $2
+            `,
+            [user_id, limit, vector]
+          );
+        }
       } else {
-        result = await pool.query(
-          `
-          SELECT
-            id,
-            user_id,
-            category,
-            content,
-            importance,
-            source,
-            created_at,
-            updated_at,
-            expires_at,
-            last_accessed_at,
-            access_count,
-            metadata
-          FROM memories
-          WHERE user_id = $1
-            AND (expires_at IS NULL OR expires_at > NOW())
-            AND content ILIKE $2
-          ORDER BY
-            importance DESC,
-            access_count DESC,
-            updated_at DESC
-          LIMIT $3
-          `,
-          [user_id, searchTerm, limit]
-        );
+        const searchTerm = `%${query.trim()}%`;
+
+        if (category) {
+          result = await pool.query(
+            `
+            SELECT
+              id,
+              user_id,
+              category,
+              content,
+              importance,
+              source,
+              created_at,
+              updated_at,
+              expires_at,
+              last_accessed_at,
+              access_count,
+              metadata
+            FROM memories
+            WHERE user_id = $1
+              AND category = $2
+              AND (expires_at IS NULL OR expires_at > NOW())
+              AND content ILIKE $3
+            ORDER BY
+              importance DESC,
+              access_count DESC,
+              updated_at DESC
+            LIMIT $4
+            `,
+            [
+              user_id,
+              cleanCategory(category),
+              searchTerm,
+              limit
+            ]
+          );
+        } else {
+          result = await pool.query(
+            `
+            SELECT
+              id,
+              user_id,
+              category,
+              content,
+              importance,
+              source,
+              created_at,
+              updated_at,
+              expires_at,
+              last_accessed_at,
+              access_count,
+              metadata
+            FROM memories
+            WHERE user_id = $1
+              AND (expires_at IS NULL OR expires_at > NOW())
+              AND content ILIKE $2
+            ORDER BY
+              importance DESC,
+              access_count DESC,
+              updated_at DESC
+            LIMIT $3
+            `,
+            [user_id, searchTerm, limit]
+          );
+        }
       }
 
-      // Registar utilização das memórias encontradas
       if (result.rowCount > 0) {
         const ids = result.rows.map(row => row.id);
 
@@ -312,6 +482,7 @@ function createServer() {
         JSON.stringify(
           {
             success: true,
+            semantic_search: embedding !== null,
             count: result.rowCount,
             memories: result.rows
           },
@@ -415,7 +586,7 @@ function createServer() {
     "update_memory",
     {
       description:
-        "Atualiza uma memória existente. Deve ser usada quando Ricardo corrige ou altera informação já guardada, em vez de criar memórias contraditórias.",
+        "Atualiza uma memória existente e recalcula o embedding semântico quando o conteúdo muda.",
       inputSchema: z.object({
         id: z.number().int().positive(),
         user_id: z.string().default("ricardo"),
@@ -471,6 +642,12 @@ function createServer() {
 
       const finalHash = createContentHash(finalContent);
 
+      let embedding = null;
+
+      if (content !== undefined) {
+        embedding = await tryCreateEmbedding(finalContent);
+      }
+
       const result = await pool.query(
         `
         UPDATE memories
@@ -482,9 +659,13 @@ function createServer() {
           expires_at = $5,
           metadata = COALESCE(metadata, '{}'::jsonb) || $6::jsonb,
           content_hash = $7,
+          embedding = CASE
+            WHEN $8::vector IS NOT NULL THEN $8::vector
+            ELSE embedding
+          END,
           updated_at = NOW()
-        WHERE id = $8
-          AND user_id = $9
+        WHERE id = $9
+          AND user_id = $10
         RETURNING *
         `,
         [
@@ -497,6 +678,7 @@ function createServer() {
             : expires_at,
           JSON.stringify(metadata ?? {}),
           finalHash,
+          embedding ? vectorToPg(embedding) : null,
           id,
           user_id
         ]
@@ -506,6 +688,8 @@ function createServer() {
         JSON.stringify(
           {
             success: true,
+            embedding_updated:
+              content !== undefined && embedding !== null,
             message: "Memória atualizada.",
             memory: result.rows[0]
           },
@@ -571,5 +755,5 @@ function createServer() {
 void serveStdio(createServer);
 
 console.error(
-  "LEGIONNAIRE Memory MCP v2.0 ativo via stdio"
+  "LEGIONNAIRE Memory MCP v3.0 SEMANTIC ativo via stdio"
 );
