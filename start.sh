@@ -19,18 +19,26 @@ if [ -z "$DATABASE_URL" ]; then
   exit 1
 fi
 
+if [ -z "$OPENAI_API_KEY" ]; then
+  echo "ERRO: OPENAI_API_KEY não definida"
+  exit 1
+fi
+
 # Limpar eventuais espaços/quebras de linha
 TAVILY_API_KEY="$(printf '%s' "$TAVILY_API_KEY" | tr -d '\r\n')"
 DATABASE_URL="$(printf '%s' "$DATABASE_URL" | tr -d '\r\n')"
+OPENAI_API_KEY="$(printf '%s' "$OPENAI_API_KEY" | tr -d '\r\n')"
 
 export TAVILY_API_KEY
 export DATABASE_URL
+export OPENAI_API_KEY
 
 echo "======================================"
 echo "LEGIONNAIRE MCP - ARRANQUE"
 echo "MCP_ENDPOINT: OK"
 echo "TAVILY_API_KEY: OK"
 echo "DATABASE_URL: OK"
+echo "OPENAI_API_KEY: OK"
 echo "======================================"
 
 cat > /workspaces/xiaozhi.config.json <<EOF
@@ -76,7 +84,8 @@ cat > /workspaces/xiaozhi.config.json <<EOF
       "command": "node",
       "args": ["/app/memory-mcp.mjs"],
       "env": {
-        "DATABASE_URL": "${DATABASE_URL}"
+        "DATABASE_URL": "${DATABASE_URL}",
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}"
       }
     }
   }
