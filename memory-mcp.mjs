@@ -11,8 +11,8 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-if (!process.env.OPENAI_API_KEY) {
-  console.error("ERROR: OPENAI_API_KEY não está definida.");
+if (!process.env.GEMINI_API_KEY) {
+  console.error("ERROR: GEMINI_API_KEY não está definida.");
   process.exit(1);
 }
 
@@ -23,7 +23,8 @@ const pool = new Pool({
   connectionTimeoutMillis: 10000
 });
 
-const EMBEDDING_MODEL = "text-embedding-3-small";
+const EMBEDDING_MODEL = "gemini-embedding-2";
+const EMBEDDING_DIMENSIONS = 1536;
 
 function textResult(text) {
   return {
@@ -60,17 +61,22 @@ function vectorToPg(vector) {
 
 async function createEmbedding(text) {
   const response = await fetch(
-    "https://api.openai.com/v1/embeddings",
+    `https://generativelanguage.googleapis.com/v1beta/models/${EMBEDDING_MODEL}:embedContent`,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-goog-api-key": process.env.GEMINI_API_KEY
       },
       body: JSON.stringify({
-        model: EMBEDDING_MODEL,
-        input: text,
-        encoding_format: "float"
+        content: {
+          parts: [
+            {
+              text
+            }
+          ]
+        },
+        output_dimensionality: EMBEDDING_DIMENSIONS
       })
     }
   );
@@ -79,21 +85,26 @@ async function createEmbedding(text) {
     const errorText = await response.text();
 
     throw new Error(
-      `OpenAI Embeddings erro ${response.status}: ${errorText}`
+      `Gemini Embeddings erro ${response.status}: ${errorText}`
     );
   }
 
   const data = await response.json();
 
   if (
-    !data.data ||
-    !data.data[0] ||
-    !Array.isArray(data.data[0].embedding)
+    !data.embedding ||
+    !Array.isArray(data.embedding.values)
   ) {
-    throw new Error("Resposta de embedding inválida.");
+    throw new Error("Resposta de embedding Gemini inválida.");
   }
 
-  return data.data[0].embedding;
+  if (data.embedding.values.length !== EMBEDDING_DIMENSIONS) {
+    throw new Error(
+      `Embedding Gemini com dimensão inesperada: ${data.embedding.values.length}`
+    );
+  }
+
+  return data.embedding.values;
 }
 
 async function tryCreateEmbedding(text) {
@@ -112,7 +123,7 @@ async function tryCreateEmbedding(text) {
 function createServer() {
   const server = new McpServer({
     name: "legionnaire-memory",
-    version: "3.0.0"
+    version: "3.1.0"
   });
 
   // ============================================================
@@ -755,5 +766,5 @@ function createServer() {
 void serveStdio(createServer);
 
 console.error(
-  "LEGIONNAIRE Memory MCP v3.0 SEMANTIC ativo via stdio"
+  "LEGIONNAIRE Memory MCP v3.1 GEMINI SEMANTIC ativo via stdio"
 );
