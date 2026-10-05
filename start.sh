@@ -14,16 +14,23 @@ if [ -z "$TAVILY_API_KEY" ]; then
   exit 1
 fi
 
-# Limpar eventuais espaços/quebras de linha da chave Tavily
+if [ -z "$DATABASE_URL" ]; then
+  echo "ERRO: DATABASE_URL não definida"
+  exit 1
+fi
+
+# Limpar eventuais espaços/quebras de linha
 TAVILY_API_KEY="$(printf '%s' "$TAVILY_API_KEY" | tr -d '\r\n')"
+DATABASE_URL="$(printf '%s' "$DATABASE_URL" | tr -d '\r\n')"
+
 export TAVILY_API_KEY
+export DATABASE_URL
 
 echo "======================================"
 echo "LEGIONNAIRE MCP - ARRANQUE"
 echo "MCP_ENDPOINT: OK"
 echo "TAVILY_API_KEY: OK"
-echo "Tavily prefixo: $(printf '%s' "$TAVILY_API_KEY" | cut -c1-10)"
-echo "Tavily tamanho: ${#TAVILY_API_KEY}"
+echo "DATABASE_URL: OK"
 echo "======================================"
 
 cat > /workspaces/xiaozhi.config.json <<EOF
@@ -63,6 +70,14 @@ cat > /workspaces/xiaozhi.config.json <<EOF
         "Accept": "application/json",
         "Content-Type": "application/json"
       }
+    },
+
+    "memory": {
+      "command": "node",
+      "args": ["/app/memory-mcp.js"],
+      "env": {
+        "DATABASE_URL": "${DATABASE_URL}"
+      }
     }
   }
 }
@@ -79,6 +94,7 @@ echo "MCPs configurados:"
 echo " - coingecko"
 echo " - tavily"
 echo " - google-calendar"
+echo " - memory"
 
 echo "A aplicar patch de reconexão automática..."
 node /app/patch-reconnect.js
