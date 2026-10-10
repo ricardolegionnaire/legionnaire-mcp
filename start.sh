@@ -1,3 +1,4 @@
+
 #!/bin/sh
 set -e
 
@@ -24,14 +25,26 @@ if [ -z "$GEMINI_API_KEY" ]; then
   exit 1
 fi
 
-# Limpar eventuais espaços/quebras de linha
+if [ -z "$LEGIONNAIRE_MCP_TOKEN" ]; then
+  echo "ERRO: LEGIONNAIRE_MCP_TOKEN não definido"
+  exit 1
+fi
+
+# Limpar eventuais espaços/quebras de linha nos segredos
 TAVILY_API_KEY="$(printf '%s' "$TAVILY_API_KEY" | tr -d '\r\n')"
 DATABASE_URL="$(printf '%s' "$DATABASE_URL" | tr -d '\r\n')"
 GEMINI_API_KEY="$(printf '%s' "$GEMINI_API_KEY" | tr -d '\r\n')"
+LEGIONNAIRE_MCP_TOKEN="$(printf '%s' "$LEGIONNAIRE_MCP_TOKEN" | tr -d '\r\n')"
+
+if [ -z "$LEGIONNAIRE_MCP_TOKEN" ]; then
+  echo "ERRO: LEGIONNAIRE_MCP_TOKEN está vazio"
+  exit 1
+fi
 
 export TAVILY_API_KEY
 export DATABASE_URL
 export GEMINI_API_KEY
+export LEGIONNAIRE_MCP_TOKEN
 
 echo "======================================"
 echo "LEGIONNAIRE MCP - ARRANQUE"
@@ -39,6 +52,7 @@ echo "MCP_ENDPOINT: OK"
 echo "TAVILY_API_KEY: OK"
 echo "DATABASE_URL: OK"
 echo "GEMINI_API_KEY: OK"
+echo "LEGIONNAIRE_MCP_TOKEN: OK"
 echo "======================================"
 
 cat > /workspaces/xiaozhi.config.json <<EOF
@@ -75,6 +89,7 @@ cat > /workspaces/xiaozhi.config.json <<EOF
       "type": "streamable-http",
       "url": "https://legionnaire-calendar.onrender.com/mcp",
       "headers": {
+        "Authorization": "Bearer ${LEGIONNAIRE_MCP_TOKEN}",
         "Accept": "application/json",
         "Content-Type": "application/json"
       }
@@ -92,6 +107,9 @@ cat > /workspaces/xiaozhi.config.json <<EOF
 }
 EOF
 
+# O ficheiro contém credenciais; evitar leitura por outros utilizadores.
+chmod 600 /workspaces/xiaozhi.config.json
+
 echo "Configuração MCP criada em /workspaces/xiaozhi.config.json"
 
 echo "Ligação configurada:"
@@ -102,7 +120,7 @@ echo " - Reconexão: 5 segundos"
 echo "MCPs configurados:"
 echo " - coingecko"
 echo " - tavily"
-echo " - google-calendar"
+echo " - google-calendar (Bearer Token)"
 echo " - memory"
 
 echo "A aplicar patch de reconexão automática..."
